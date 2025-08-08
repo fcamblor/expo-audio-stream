@@ -30,7 +30,13 @@ extension UInt16 {
     }
 }
 
-class AudioStreamManager: NSObject {
+// Define DeviceDisconnectionBehavior enum mirroring ExpoAudioStream.types.ts
+enum DeviceDisconnectionBehavior: String {
+    case PAUSE = "pause"
+    case FALLBACK = "fallback"
+}
+
+class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
     private let audioEngine = AVAudioEngine()
     private var inputNode: AVAudioInputNode {
         return audioEngine.inputNode
@@ -40,9 +46,9 @@ class AudioStreamManager: NSObject {
     private var startTime: Date?
     private var totalPausedDuration: TimeInterval = 0  // Track total paused time
     private var currentPauseStart: Date?              // Track current pause start
-    private var isRecording = false
-    private var isPaused = false
-    private var isPrepared = false  // Add this new state flag
+    var isRecording = false
+    var isPaused = false
+    var isPrepared = false  // Add this new state flag
     
     // Wake lock related properties
     private var wasIdleTimerDisabled: Bool = false  // Track previous idle timer state
@@ -97,9 +103,13 @@ class AudioStreamManager: NSObject {
     private var emissionInterval: TimeInterval = 1.0  // Default 1 second
     private var emissionIntervalAnalysis: TimeInterval = 0.5  // Default 0.5 seconds
 
+    // ---> ADD BACK deviceManager PROPERTY <--- 
+    private let deviceManager = AudioDeviceManager()
+
     /// Initializes the AudioStreamManager
     override init() {
         super.init()
+        deviceManager.delegate = self // Set the delegate
         // Only keep audio session interruption observer here
         NotificationCenter.default.addObserver(
             self,
