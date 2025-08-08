@@ -1255,39 +1255,42 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
         let targetSampleRate = Double(settings.sampleRate)
         let targetFormat: AVAudioCommonFormat = settings.bitDepth == 32 ? .pcmFormatFloat32 : .pcmFormatInt16
         
-        // First handle resampling if needed
-        let resampledBuffer: AVAudioPCMBuffer
+        // Buffer to be processed - initially the input buffer
+        var bufferToProcess: AVAudioPCMBuffer = buffer
+        
+        // 1. Resample if the buffer's sample rate doesn't match the target
         if buffer.format.sampleRate != targetSampleRate {
             if let resampled = resampleAudioBuffer(buffer, from: buffer.format.sampleRate, to: targetSampleRate) {
-                resampledBuffer = resampled
+                bufferToProcess = resampled
             } else {
-                Logger.debug("Resampling failed")
+                Logger.debug("processAudioBuffer: Resampling FAILED")
                 return
             }
-        } else {
-            resampledBuffer = buffer
         }
-        
-        // Then ensure format matches user settings
-        let finalBuffer: AVAudioPCMBuffer
-        if resampledBuffer.format.commonFormat != targetFormat {
-            guard let converted = convertBufferFormat(resampledBuffer, to: AVAudioFormat(
+
+        // 2. Convert format if the (potentially resampled) buffer's format doesn't match the target
+        if bufferToProcess.format.commonFormat != targetFormat {
+            guard let targetAVFormat = AVAudioFormat(
                 commonFormat: targetFormat,
-                sampleRate: targetSampleRate,
+                sampleRate: targetSampleRate, // Use target rate for final format
                 channels: AVAudioChannelCount(settings.numberOfChannels),
-                interleaved: true
-            )!) else {
-                Logger.debug("Format conversion failed")
+                interleaved: bufferToProcess.format.isInterleaved // Match interleaving of current buffer
+            ) else {
+                Logger.debug("processAudioBuffer: Failed to create target AVAudioFormat for conversion.")
                 return
             }
-            finalBuffer = converted
-        } else {
-            finalBuffer = resampledBuffer
+            if let converted = convertBufferFormat(bufferToProcess, to: targetAVFormat) {
+                bufferToProcess = converted
+            } else {
+                Logger.debug("processAudioBuffer: Format conversion FAILED")
+                return
+            }
         }
         
-        let audioData = finalBuffer.audioBufferList.pointee.mBuffers
+        // Now bufferToProcess contains the audio data in the desired sample rate and format
+        let audioData = bufferToProcess.audioBufferList.pointee.mBuffers
         guard let bufferData = audioData.mData else {
-            Logger.debug("Buffer data is nil.")
+            Logger.debug("Buffer data is nil after processing.")
             return
         }
         
