@@ -670,11 +670,18 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
         recordingFileURL = createRecordingFile()
         if let url = recordingFileURL {
             do {
+                // Ensure directory exists if needed (createRecordingFile should handle this, but belt-and-suspenders)
+                try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
+                // Create the file if it doesn't exist (createRecordingFile should also handle this)
+                if !fileManager.fileExists(atPath: url.path) {
+                    fileManager.createFile(atPath: url.path, contents: nil, attributes: nil)
+                }
                 // Open the handle for writing
                 self.fileHandle = try FileHandle(forWritingTo: url)
                 Logger.debug("File handle opened for \(url.path)")
             } catch {
-                Logger.debug("Error opening file handle: \(error.localizedDescription)")
+                Logger.debug("Error creating/opening file handle: \(error.localizedDescription)")
+                // No need to call cleanupPreparation here, return false will handle it
                 return false
             }
         } else {
