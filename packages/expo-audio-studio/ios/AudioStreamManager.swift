@@ -43,6 +43,7 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
     }
     internal var recordingFileURL: URL?
     private var audioProcessor: AudioProcessor?
+    private var fileHandle: FileHandle?
     private var startTime: Date?
     private var totalPausedDuration: TimeInterval = 0  // Track total paused time
     private var currentPauseStart: Date?              // Track current pause start
@@ -667,8 +668,17 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
 
         // Create recording file first
         recordingFileURL = createRecordingFile()
-        if recordingFileURL == nil {
-            Logger.debug("Error: Failed to create recording file.")
+        if let url = recordingFileURL {
+            do {
+                // Open the handle for writing
+                self.fileHandle = try FileHandle(forWritingTo: url)
+                Logger.debug("File handle opened for \(url.path)")
+            } catch {
+                Logger.debug("Error opening file handle: \(error.localizedDescription)")
+                return false
+            }
+        } else {
+            Logger.debug("Error: Failed to create recording file URL.")
             return false
         }
         
