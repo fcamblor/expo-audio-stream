@@ -709,6 +709,13 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
             
             // Apply the final configuration
             try session.setCategory(category, mode: mode, options: options)
+            // NOTE: We intentionally DO NOT call session.setPreferredSampleRate().
+            // Trying to force a sample rate different from the hardware's actual rate
+            // often prevents the input node's tap from receiving any buffers.
+            // Instead, we let the session negotiate the rate and install the tap
+            // using the format reported by the input node just before installation.
+            // Resampling to the desired settings.sampleRate happens later in processAudioBuffer.
+            try session.setPreferredIOBufferDuration(1024 / Double(settings.sampleRate))
             try session.setActive(true, options: .notifyOthersOnDeactivation)
             
             Logger.debug("""
@@ -725,51 +732,23 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
                 - compression enabled: \(settings.enableCompressedOutput)
             """)
             
-            // Set preferred sample rate but don't rely on it being applied
-            try session.setPreferredSampleRate(Double(settings.sampleRate))
-            try session.setPreferredIOBufferDuration(1024 / Double(settings.sampleRate))
-            try session.setActive(true)
-            Logger.debug("Audio session activated successfully.")
-            
-            // CRITICAL FIX: In iOS, the hardware sometimes doesn't honor our preferred sample rate.
-            // Here we query the *actual* hardware input format to ensure we match exactly what the hardware gives us.
-            let reportedSessionRate = session.sampleRate
-            
-            // Get the format directly from the input node, which is the most reliable way to determine the hardware format
-            let inputNodeFormat = audioEngine.inputNode.outputFormat(forBus: 0)
-            let actualHardwareSampleRate = inputNodeFormat.sampleRate
-            
+            // Get the final tap format *directly* from the input node *just before* installing.
+            // This seems more reliable than using session.sampleRate across device changes.
+            // Relying on session.sampleRate or inputNode.outputFormat earlier led to crashes
+            // or the tap not receiving buffers, especially when switching devices (e.g., Bluetooth)
+            // or using sample rates different from the hardware's native rate.
+            let tapFormat = audioEngine.inputNode.outputFormat(forBus: 0)
+
             Logger.debug("""
-                Sample rate detection:
-                - Requested rate: \(settings.sampleRate)Hz
-                - iOS session reported rate: \(reportedSessionRate)Hz
-                - Input node actual rate: \(actualHardwareSampleRate)Hz
-                - Will use input node rate for tap and resample to requested rate
-                """)
-            
-            recordingSettings = newSettings  // Keep original settings with desired sample rate
-            
-            // CRITICAL FIX: Create format matching ACTUAL hardware capabilities from the input node
-            guard let hardwareFormat = AVAudioFormat(
-                commonFormat: .pcmFormatFloat32,
-                sampleRate: actualHardwareSampleRate,
-                channels: AVAudioChannelCount(settings.numberOfChannels),
-                interleaved: true
-            ) else {
-                Logger.debug("Failed to create hardware format")
-                return false
-            }
-            
-            Logger.debug("""
-                Audio format configuration:
-                - Hardware input format: \(describeAudioFormat(inputNodeFormat))
-                - Tap format: \(describeAudioFormat(hardwareFormat))
-                - Final output format: \(settings.bitDepth)-bit at \(settings.sampleRate)Hz
-                - Channels: \(settings.numberOfChannels)
+                Final Tap Configuration:
+                - Tap Format: \(describeAudioFormat(tapFormat))
+                - Requested Output Format: \(settings.bitDepth)-bit at \(settings.sampleRate)Hz
                 """)
 
-            // CRITICAL FIX: Install tap with the ACTUAL hardware format from the input node
-            audioEngine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: hardwareFormat) { [weak self] (buffer, time) in
+            recordingSettings = newSettings  // Keep original settings with desired sample rate
+            
+            // CRITICAL FIX: Install tap with the format reported by the input node itself.
+            audioEngine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: tapFormat) { [weak self] (buffer, time) in // Use tapFormat here
                 guard let self = self,
                       let fileURL = self.recordingFileURL,
                       self.isRecording else { // Only process buffer if actually recording
