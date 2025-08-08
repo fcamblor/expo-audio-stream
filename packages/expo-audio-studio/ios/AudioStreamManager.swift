@@ -1254,14 +1254,6 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
             return
         }
         
-        guard let fileHandle = try? FileHandle(forWritingTo: fileURL) else {
-            Logger.debug("Failed to open file handle for URL: \(fileURL)")
-            return
-        }
-        defer {
-            fileHandle.closeFile()  // Ensure file is always closed
-        }
-
         // targetSampleRate and targetFormat remain the user's requested final format
         let targetSampleRate = Double(settings.sampleRate)
         let targetFormat: AVAudioCommonFormat = settings.bitDepth == 32 ? .pcmFormatFloat32 : .pcmFormatInt16
@@ -1313,9 +1305,20 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
             data.insert(contentsOf: header, at: 0)
         }
 
-        // Write to file
-        fileHandle.seekToEndOfFile()
-        fileHandle.write(data)
+        // --- Background File Writing ---
+        // Use the persistent fileHandle opened during preparation.
+        DispatchQueue.global(qos: .utility).async { [weak self, data] in
+            guard let self = self, let handle = self.fileHandle else {
+                Logger.debug("BG Write Error: File handle is nil.")
+                return
+            }
+            do {
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+            } catch {
+                Logger.debug("BG Write Error: Failed to seek/write: \(error.localizedDescription)")
+            }
+        }
 
         // Update total size and accumulated data
         totalDataSize += Int64(data.count)
