@@ -140,13 +140,16 @@ class AudioRecordingService : Service() {
         fun startService(context: Context) {
             try {
                 val serviceIntent = Intent(context, AudioRecordingService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(serviceIntent)
-                    Log.d(Constants.TAG, "Started foreground service")
-                } else {
+//              Uncomment the following lines if you want to use foreground service
+//              We force the regular service to use startService instead of startForegroundService
+//              to avoid issues with Android 14 and above.
+//                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+//                    context.startForegroundService(serviceIntent)
+//                    Log.d(Constants.TAG, "Started foreground service")
+//                } else {
                     context.startService(serviceIntent)
                     Log.d(Constants.TAG, "Started regular service")
-                }
+//                }
                 setServiceRunning(true)
             } catch (e: Exception) {
                 Log.e(Constants.TAG, "Failed to start service: ${e.message}", e)
