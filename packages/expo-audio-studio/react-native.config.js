@@ -1,5 +1,0 @@
-module.exports = {
-    dependency: {
-        platforms: {},
-    },
-}
