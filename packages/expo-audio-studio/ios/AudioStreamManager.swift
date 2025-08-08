@@ -1252,6 +1252,7 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
             fileHandle.closeFile()  // Ensure file is always closed
         }
 
+        // targetSampleRate and targetFormat remain the user's requested final format
         let targetSampleRate = Double(settings.sampleRate)
         let targetFormat: AVAudioCommonFormat = settings.bitDepth == 32 ? .pcmFormatFloat32 : .pcmFormatInt16
         
