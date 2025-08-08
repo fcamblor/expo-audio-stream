@@ -1232,13 +1232,15 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
         }
     }
     
-    /// Processes the audio buffer and writes data to the file. Also handles audio processing if enabled.
+    /// Processes the audio buffer: handles resampling/format conversion if necessary,
+    /// writes the result to the WAV file on a background thread, and triggers
+    /// analysis processing and event emission based on intervals.
     /// - Parameters:
-    ///   - buffer: The audio buffer to process.
-    ///   - fileURL: The URL of the file to write the data to.
+    ///   - buffer: The audio buffer received from the input node tap.
+    ///   - fileURL: The URL of the file to write the data to (ignored, uses self.fileHandle).
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer, fileURL: URL) {
         guard let settings = recordingSettings else {
-            Logger.debug("Recording settings not available")
+            Logger.debug("processAudioBuffer: Recording settings not available")
             return
         }
         
