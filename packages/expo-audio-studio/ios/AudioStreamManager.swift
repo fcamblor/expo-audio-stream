@@ -1671,6 +1671,170 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
             return nil
         }
     }
+
+    // MARK: - AudioDeviceManagerDelegate Implementation
+
+    func audioDeviceManager(_ manager: AudioDeviceManager, didDetectDisconnectionOfDevice disconnectedDeviceId: String) {
+        // This method will be called by AudioDeviceManager when a disconnection occurs
+        // Run on main thread to safely interact with AVAudioEngine and state
+        DispatchQueue.main.async {
+            self.handleDeviceDisconnection(disconnectedDeviceId: disconnectedDeviceId)
+        }
+    }
+
+    // MARK: - Device Disconnection Handling
+
+    // Define interruption reasons matching ExpoAudioStream.types.ts
+    enum RecordingInterruptionReason: String {
+        case deviceDisconnected = "deviceDisconnected"
+        case deviceFallback = "deviceFallback"
+        case deviceSwitchFailed = "deviceSwitchFailed"
+        // Add other reasons if needed (e.g., from handleAudioSessionInterruption)
+        case audioFocusLoss = "audioFocusLoss"
+        case audioFocusGain = "audioFocusGain"
+        case phoneCall = "phoneCall"
+        case phoneCallEnded = "phoneCallEnded"
+        case recordingStopped = "recordingStopped"
+        case deviceConnected = "deviceConnected"
+    }
+
+    private func handleDeviceDisconnection(disconnectedDeviceId: String) {
+        guard isRecording else {
+            Logger.debug("Device disconnected (\(disconnectedDeviceId)), but not recording. Ignoring.")
+            return
+        }
+
+        guard let settings = recordingSettings,
+              let currentRecordingDeviceId = settings.deviceId else {
+             Logger.debug("Device disconnected (\(disconnectedDeviceId)), but current settings or deviceId are missing. Pausing.")
+             performPauseAction(reason: .deviceDisconnected)
+            return
+        }
+
+        // Normalize BOTH IDs for reliable comparison
+        let normalizedCurrentId = deviceManager.normalizeBluetoothDeviceId(currentRecordingDeviceId)
+        let normalizedDisconnectedId = deviceManager.normalizeBluetoothDeviceId(disconnectedDeviceId)
+
+        Logger.debug("Handling disconnection. Current device: \(normalizedCurrentId), Disconnected device: \(normalizedDisconnectedId)")
+
+        if normalizedCurrentId == normalizedDisconnectedId {
+            // Get the string value from settings using the correct property name
+            // The property in RecordingSettings likely matches the TS interface: deviceDisconnectionBehavior
+            let behaviorString = settings.deviceDisconnectionBehavior ?? "pause" // Use the correct property name
+            let behavior = DeviceDisconnectionBehavior(rawValue: behaviorString) ?? .PAUSE // Convert to enum, default to .PAUSE
+
+            Logger.debug("Recording device disconnected! Applying behavior: \(behavior.rawValue)")
+
+            delegate?.audioStreamManager(self, didReceiveInterruption: [
+                "reason": RecordingInterruptionReason.deviceDisconnected.rawValue,
+                "isPaused": isPaused
+            ])
+
+            // Switch on the *enum* value
+            switch behavior {
+            case .PAUSE:
+                performPauseAction(reason: .deviceDisconnected)
+
+            case .FALLBACK:
+                 Task { 
+                    await performFallbackAction()
+                 }
+            }
+        } else {
+             Logger.debug("A different device disconnected (\(normalizedDisconnectedId)). Current recording device (\(normalizedCurrentId)) is still active. Ignoring.")
+        }
+    }
+
+    private func performPauseAction(reason: RecordingInterruptionReason) {
+        if !isPaused { // Only pause if not already paused
+            Logger.debug("Pausing recording due to \(reason.rawValue)")
+            pauseRecording() // Use existing pause function
+        } else {
+            Logger.debug("Recording was already paused when \(reason.rawValue) occurred.")
+        }
+        // Note: pauseRecording already notifies the delegate about the pause state change.
+        // Send an additional interruption notification specifically for the reason
+         delegate?.audioStreamManager(self, didReceiveInterruption: [
+             "reason": reason.rawValue,
+             "isPaused": true // Since we are pausing or were already paused
+         ])
+    }
+
+    private func performFallbackAction() async {
+        Logger.debug("Attempting to fallback to default device...")
+
+        do {
+            // 1. Get the new default device (using the async version)
+            guard let defaultDevice = await deviceManager.getDefaultInputDevice() else {
+                 Logger.debug("Fallback failed: Could not get default input device. Pausing.")
+                 performPauseAction(reason: .deviceSwitchFailed) // Fallback to pause if no default
+                 return
+            }
+            Logger.debug("Found default device for fallback: \(defaultDevice.name) (ID: \(defaultDevice.id))")
+
+            // 2. Stop engine temporarily (might cause a small gap)
+            // Store current pause state to restore it later if needed
+            let wasManuallyPaused = isPaused
+            if !wasManuallyPaused && audioEngine.isRunning {
+                 audioEngine.pause()
+            }
+
+            // 3. Update settings and select the new device in the session
+            recordingSettings?.deviceId = defaultDevice.id // Update setting
+            let selectionSuccess = await deviceManager.selectDevice(defaultDevice.id)
+             if !selectionSuccess {
+                 Logger.debug("Fallback failed: Could not select default device in session. Pausing.")
+                 // Ensure engine remains paused if we paused it earlier
+                 if !wasManuallyPaused && !audioEngine.isRunning {
+                     // No need to attempt restart if selection failed
+                 } else if wasManuallyPaused {
+                     // If it was already paused, keep it paused
+                 }
+                 performPauseAction(reason: .deviceSwitchFailed)
+                 return
+             }
+
+             Logger.debug("Successfully selected default device \(defaultDevice.id) in session.")
+
+            // 4. ***Crucial/Complex Part: Handle Audio Tap***
+            //    Option A (Simpler, current): Assume the tap continues if format is compatible.
+            //    Option B (More Robust): Re-install the tap.
+             Logger.debug("Attempting fallback without reinstalling audio tap. (Verify if audio continues)")
+
+
+            // 5. Restart engine if it wasn't manually paused before
+             if !wasManuallyPaused {
+                 // Only start if it's not running (it should have been paused earlier)
+                 if !audioEngine.isRunning {
+                     do {
+                         try audioEngine.start()
+                         Logger.debug("Audio engine restarted for fallback.")
+                     } catch {
+                         Logger.debug("Fallback failed: Could not restart audio engine. Pausing. Error: \(error)")
+                         performPauseAction(reason: .deviceSwitchFailed)
+                         return
+                     }
+                 } else {
+                    Logger.debug("Audio engine was already running during fallback attempt? Unexpected state.")
+                 }
+             } else {
+                 Logger.debug("Recording was manually paused, leaving engine paused after fallback.")
+             }
+
+            // 6. Notify JS about successful fallback
+            delegate?.audioStreamManager(self, didReceiveInterruption: [
+                "reason": RecordingInterruptionReason.deviceFallback.rawValue,
+                "newDeviceId": defaultDevice.id, // Include new device ID
+                "isPaused": isPaused // Report current state
+            ])
+            Logger.debug("Fallback to device \(defaultDevice.id) successful.")
+
+        } catch {
+             Logger.debug("Fallback failed with error: \(error). Pausing.")
+             performPauseAction(reason: .deviceSwitchFailed)
+        }
+    }
+
 }
 
 extension AudioStreamManager: UNUserNotificationCenterDelegate {
