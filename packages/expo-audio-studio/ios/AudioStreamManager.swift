@@ -1309,13 +1309,7 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
         }
 
         // Create an immutable copy for background/event emission
-        var dataToWrite = Data(bytes: bufferData, count: Int(audioData.mDataByteSize))
-
-        // Check if this is the first buffer to process
-        if totalDataSize == 0 {
-            let header = createWavHeader(dataSize: 0)
-            dataToWrite.insert(contentsOf: header, at: 0)
-        }
+        let dataToWrite = Data(bytes: bufferData, count: Int(audioData.mDataByteSize))
 
         // --- Background File Writing ---
         // Use the persistent fileHandle opened during preparation.
@@ -1327,13 +1321,14 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
             do {
                 try handle.seekToEnd()
                 try handle.write(contentsOf: dataToWrite)
+                // Update total size state
+                self.totalDataSize += Int64(dataToWrite.count)
             } catch {
                  Logger.debug("BG Write Error: Failed to seek/write: \(error.localizedDescription)")
             }
         }
 
         // --- Event Emission & Analysis ---
-        totalDataSize += Int64(dataToWrite.count)
         accumulatedData.append(dataToWrite)
         accumulatedAnalysisData.append(dataToWrite)
 
