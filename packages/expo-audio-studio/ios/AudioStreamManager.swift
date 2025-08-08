@@ -1468,6 +1468,39 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
         return outputBuffer
     }
 
+    /// Attempts to update the audio session with the preferred input device from current settings.
+    /// Called externally when the device selection changes.
+    /// Note: Avoids changing sample rate or buffer duration while engine might be running.
+    public func updateAudioSessionWithCurrentSettings() {
+        guard let settings = self.recordingSettings, let deviceId = settings.deviceId else {
+            Logger.debug("Cannot update audio session preference, settings or deviceId missing")
+            return
+        }
+        
+        let session = AVAudioSession.sharedInstance()
+        
+        // Find the requested device port
+        let selectedPort = session.availableInputs?.first { port in
+            // Normalize IDs for comparison, especially for Bluetooth
+            let portNormalizedId = deviceManager.normalizeBluetoothDeviceId(port.uid)
+            let requestedNormalizedId = deviceManager.normalizeBluetoothDeviceId(deviceId)
+            return portNormalizedId == requestedNormalizedId
+        }
+        
+        if let portToSet = selectedPort {
+            do {
+                try session.setPreferredInput(portToSet)
+                Logger.debug("Attempted to set preferred input to: \(portToSet.portName) (ID: \(portToSet.uid))")
+                 // We add a small delay hoping the system applies the change before potential next operations
+                Thread.sleep(forTimeInterval: 0.1)
+            } catch {
+                Logger.debug("Failed to set preferred input device \(portToSet.portName): \(error.localizedDescription)")
+            }
+        } else {
+            Logger.debug("Could not find device with ID \(deviceId) to set as preferred input.")
+        }
+    }
+
     /// Stops the current audio recording.
     /// - Returns: A RecordingResult object if the recording stopped successfully, or nil otherwise.
     func stopRecording() -> RecordingResult? {
