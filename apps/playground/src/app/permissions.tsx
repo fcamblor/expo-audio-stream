@@ -1,12 +1,16 @@
 // playground/src/app/(tabs)/play.tsx
-import { ScreenWrapper, useTheme, AppTheme } from '@siteed/design-system'
-import { ExpoAudioStreamModule } from '@siteed/expo-audio-studio'
 import React, { useCallback, useEffect, useState } from 'react'
+
+import { MaterialCommunityIcons } from '@expo/vector-icons'
 import { Alert, Linking, StyleSheet, View } from 'react-native'
 import { Button, Text } from 'react-native-paper'
-import { MaterialCommunityIcons } from '@expo/vector-icons'
+
+import type { AppTheme } from '@siteed/design-system'
+import { ScreenWrapper, useTheme } from '@siteed/design-system'
+import { ExpoAudioStreamModule } from '@siteed/expo-audio-studio'
 
 import { baseLogger } from '../config'
+import { useScreenHeader } from '../hooks/useScreenHeader'
 
 interface PermissionStatus {
     status: string
@@ -105,6 +109,12 @@ const getStyles = ({ theme }: { theme: AppTheme }) => {
 export const PermissionsPage = () => {
     const theme = useTheme()
     const styles = getStyles({ theme })
+    
+    useScreenHeader({
+      title: 'Audio Permissions',
+      backBehavior: { fallbackUrl: '/more' },
+    })
+
     const [permissions, setPermissions] = useState<PermissionStatus | null>(
         null
     )

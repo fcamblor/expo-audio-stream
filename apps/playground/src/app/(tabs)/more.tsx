@@ -1,27 +1,32 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons"
-import {
-    AppTheme,
-    LabelSwitch,
-    ListItem,
-    ScreenWrapper,
-    useThemePreferences,
-} from '@siteed/design-system'
+import React, { memo, useCallback, useMemo, useState, useRef } from 'react'
+
+import { MaterialCommunityIcons } from '@expo/vector-icons'
 import Constants from 'expo-constants'
 import { useRouter } from 'expo-router'
-import React, { memo, useCallback, useMemo, useState } from 'react'
 import { Image, Pressable, StyleSheet, View } from 'react-native'
 import { Text } from 'react-native-paper'
 import Animated, {
     useAnimatedStyle,
     useSharedValue,
     withTiming,
-} from "react-native-reanimated"
+} from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+
+import type {
+    AppTheme } from '@siteed/design-system'
+import {
+    LabelSwitch,
+    ListItem,
+    ScreenWrapper,
+    useThemePreferences,
+} from '@siteed/design-system'
 
 import { TranscriberConfig } from '../../component/TranscriberConfig'
 import { Updater } from '../../component/Updater'
 import { useAppUpdates } from '../../hooks/useAppUpdates'
 import { isWeb } from '../../utils/utils'
+
+import type { LayoutChangeEvent } from 'react-native'
 
 const getStyles = ({ theme, insets }: { theme: AppTheme, insets?: { bottom: number, top: number } }) => {
     return StyleSheet.create({
@@ -62,6 +67,12 @@ const getStyles = ({ theme, insets }: { theme: AppTheme, insets?: { bottom: numb
             backgroundColor: theme.colors.surface,
             margin: 0,
         },
+        contentMeasure: {
+            position: 'absolute',
+            opacity: 0,
+            zIndex: -1,
+            pointerEvents: 'none',
+        },
     })
 }
 
@@ -75,7 +86,22 @@ const AppInfoBanner = memo(function AppInfoBanner({
 }) {
     const [isExpanded, setIsExpanded] = useState(false)
     const animatedHeight = useSharedValue(56)
-    const EXPANDED_HEIGHT = 200
+    const [contentHeight, setContentHeight] = useState(200) // Default fallback height
+    const contentMeasured = useRef(false)
+    const styles = useMemo(() => getStyles({ theme }), [theme])
+
+    const handleContentLayout = useCallback((event: LayoutChangeEvent) => {
+        const { height } = event.nativeEvent.layout
+        if (height > 0 && (!contentMeasured.current || height !== contentHeight)) {
+            setContentHeight(height)
+            contentMeasured.current = true
+            
+            // If already expanded, update the animation height
+            if (isExpanded) {
+                animatedHeight.value = withTiming(height, { duration: 300 })
+            }
+        }
+    }, [contentHeight, isExpanded, animatedHeight])
 
     const animatedStyle = useAnimatedStyle(() => ({
         height: animatedHeight.value,
@@ -84,54 +110,77 @@ const AppInfoBanner = memo(function AppInfoBanner({
     const toggleExpanded = useCallback(() => {
         setIsExpanded((prev) => {
             const newIsExpanded = !prev
-            animatedHeight.value = withTiming(newIsExpanded ? EXPANDED_HEIGHT : 56, {
+            animatedHeight.value = withTiming(newIsExpanded ? contentHeight : 56, {
                 duration: 300,
             })
             return newIsExpanded
         })
-    }, [animatedHeight])
+    }, [animatedHeight, contentHeight])
+
+    const renderContent = () => (
+        <>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <Text style={{ color: theme.colors.onTertiaryContainer }}>
+                        About Audio Playground
+                    </Text>
+                </View>
+                <MaterialCommunityIcons
+                    name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                    size={24}
+                    color={theme.colors.onTertiaryContainer}
+                />
+            </View>
+
+            {(isExpanded || contentMeasured.current === false) && (
+                <Text
+                    style={{
+                        marginTop: 16,
+                        color: theme.colors.onTertiaryContainer,
+                    }}
+                >
+                    Audio Playground is a professional audio recording application featuring advanced
+                    real-time waveform visualization. It demonstrates high-quality audio processing
+                    capabilities including live recording, playback, and visual representation of
+                    audio signals. Perfect for developers and audio enthusiasts looking to understand
+                    audio processing in mobile applications.
+                </Text>
+            )}
+        </>
+    )
 
     return (
         <Pressable onPress={toggleExpanded}>
+            {/* Hidden measurement view */}
+            <View 
+                style={styles.contentMeasure} 
+                onLayout={handleContentLayout}
+            >
+                <View
+                    style={{
+                        borderRadius: 12,
+                        padding: 16,
+                        marginBottom: 16,
+                        backgroundColor: theme.colors.tertiaryContainer,
+                    }}
+                >
+                    {renderContent()}
+                </View>
+            </View>
+            
             <Animated.View
                 style={[
                     {
                         borderRadius: 12,
                         padding: 16,
                         marginBottom: 16,
-                        overflow: "hidden",
+                        overflow: 'hidden',
                         backgroundColor: theme.colors.tertiaryContainer,
                     },
                     animatedStyle,
                 ]}
             >
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
-                        <Text style={{ color: theme.colors.onTertiaryContainer }}>
-                            About Audio Playground
-                        </Text>
-                    </View>
-                    <MaterialCommunityIcons
-                        name={isExpanded ? "chevron-up" : "chevron-down"}
-                        size={24}
-                        color={theme.colors.onTertiaryContainer}
-                    />
-                </View>
-
-                {isExpanded && (
-                    <Text
-                        style={{
-                            marginTop: 16,
-                            color: theme.colors.onTertiaryContainer,
-                        }}
-                    >
-                        Audio Playground is a professional audio recording application featuring advanced
-                        real-time waveform visualization. It demonstrates high-quality audio processing
-                        capabilities including live recording, playback, and visual representation of
-                        audio signals. Perfect for developers and audio enthusiasts looking to understand
-                        audio processing in mobile applications.
-                    </Text>
-                )}
+                {renderContent()}
             </Animated.View>
         </Pressable>
     )
@@ -150,7 +199,7 @@ export const MoreScreen = () => {
         isUpdateAvailable,
         checkUpdates,
         canUpdate,
-    } = useAppUpdates();
+    } = useAppUpdates()
 
     return (
         <ScreenWrapper
@@ -192,7 +241,7 @@ export const MoreScreen = () => {
             <View style={styles.configSection}>
                 <Text style={styles.sectionTitle}>Transcription Model</Text>
                 <TranscriberConfig
-                    compact={true}
+                    compact
                     onConfigChange={() => {
                         // Optional callback when config changes
                     }}
@@ -207,6 +256,19 @@ export const MoreScreen = () => {
                     router.navigate('/logs')
                 }}
             />
+            {isWeb && (
+                <ListItem
+                    contentContainerStyle={{
+                        ...styles.listItemContainer,
+                        backgroundColor: theme.colors.primaryContainer,
+                    }}
+                    label="Download Apps"
+                    subLabel="Get AudioPlayground for iOS and Android"
+                    onPress={() => {
+                        router.navigate('/download')
+                    }}
+                />
+            )}
             <ListItem
                 contentContainerStyle={styles.listItemContainer}
                 label="Permissions"
@@ -225,7 +287,7 @@ export const MoreScreen = () => {
                                 onPress={() => {
                                     router.navigate('/audio-device-test')
                                 }}
-                            />
+            />
             {__DEV__ && (
                 <>
                     {isWeb && (

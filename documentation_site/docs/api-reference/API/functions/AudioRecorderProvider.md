@@ -8,7 +8,7 @@
 
 > **AudioRecorderProvider**(`props`, `deprecatedLegacyContext`?): `ReactNode`
 
-Defined in: [src/AudioRecorder.provider.tsx:34](https://github.com/deeeed/expo-audio-stream/blob/b15daef29a631eb696d5a28422f9cf32b080027e/packages/expo-audio-studio/src/AudioRecorder.provider.tsx#L34)
+Defined in: [src/AudioRecorder.provider.tsx:37](https://github.com/deeeed/expo-audio-stream/blob/e9d4ade779a423b3aff172ba9ca49eec6c8962d9/packages/expo-audio-studio/src/AudioRecorder.provider.tsx#L37)
 
 ## Parameters
 

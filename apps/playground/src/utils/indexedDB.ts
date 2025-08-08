@@ -1,6 +1,6 @@
 // playground/src/utils/indexedDB.ts
 
-import { AudioRecording } from '@siteed/expo-audio-studio'
+import type { AudioRecording } from '@siteed/expo-audio-studio'
 import { getLogger } from '@siteed/react-native-logger'
 
 interface OpenDatabaseParams {
@@ -87,44 +87,72 @@ export const storeAudioFile = async ({
     metadata,
     skipWorker = false,
 }: StoreAudioFileParams): Promise<void> => {
-    if (worker && !skipWorker) {
-        return new Promise((resolve, reject) => {
-            const handleMessage = (e: MessageEvent) => {
-                if (e.data.type === 'success' && e.data.fileName === fileName) {
-                    worker?.removeEventListener('message', handleMessage)
-                    logger.debug(`Stored audio file ${fileName} successfully in background`)
-                    resolve()
-                } else if (e.data.type === 'error') {
-                    worker?.removeEventListener('message', handleMessage)
-                    reject(new Error(e.data.error))
+    try {
+        // CRITICAL FIX: Ensure we have valid array buffer data
+        // Check if arrayBuffer is actually a Blob (this can happen due to type coercion)
+        if (arrayBuffer instanceof Blob || (typeof arrayBuffer === 'object' && arrayBuffer !== null && 'arrayBuffer' in arrayBuffer)) {
+            logger.debug(`Converting Blob to ArrayBuffer`)
+            try {
+                // @ts-expect-error - Handle potential Blob object
+                const buffer = await arrayBuffer.arrayBuffer()
+                arrayBuffer = buffer
+            } catch (error) {
+                logger.error(`Failed to convert Blob to ArrayBuffer:`, error)
+                throw new Error('Invalid audio data: Failed to convert to ArrayBuffer')
+            }
+        }
+        
+        // Simple size validation
+        if (!(arrayBuffer instanceof ArrayBuffer) || arrayBuffer.byteLength === 0) {
+            logger.error(`Invalid or empty ArrayBuffer`)
+            throw new Error('Invalid audio data')
+        }
+
+        if (worker && !skipWorker) {
+            return new Promise((resolve, reject) => {
+                const handleMessage = (e: MessageEvent) => {
+                    if (e.data.type === 'success' && e.data.fileName === fileName) {
+                        worker?.removeEventListener('message', handleMessage)
+                        logger.debug(`Stored audio file ${fileName} successfully in background`)
+                        resolve()
+                    } else if (e.data.type === 'error') {
+                        worker?.removeEventListener('message', handleMessage)
+                        reject(new Error(e.data.error))
+                    }
                 }
+
+                worker?.addEventListener('message', handleMessage)
+                worker?.postMessage({
+                    type: 'storeAudioFile',
+                    payload: { fileName, arrayBuffer, metadata },
+                })
+            })
+        }
+
+        // Fallback to synchronous storage if worker is not available or skipWorker is true
+        const db = await openDatabase({ dbName: 'AudioStorage', dbVersion: 1 })
+        const transaction = db.transaction('audioFiles', 'readwrite')
+        const store = transaction.objectStore('audioFiles')
+        const record: AudioFileRecord = { fileName, arrayBuffer, metadata }
+        store.put(record)
+
+        return new Promise<void>((resolve, reject) => {
+            transaction.oncomplete = () => {
+                logger.debug(`Stored audio file ${fileName} successfully`, {
+                    fileSize: arrayBuffer.byteLength,
+                })
+                resolve()
             }
 
-            worker?.addEventListener('message', handleMessage)
-            worker?.postMessage({
-                type: 'storeAudioFile',
-                payload: { fileName, arrayBuffer, metadata }
-            })
+            transaction.onerror = () => {
+                logger.error(`Failed to store ${fileName}:`, transaction.error ?? 'Unknown error')
+                reject(transaction.error)
+            }
         })
+    } catch (error) {
+        logger.error(`Error in storeAudioFile:`, error)
+        throw error
     }
-
-    // Fallback to synchronous storage if worker is not available or skipWorker is true
-    const db = await openDatabase({ dbName: 'AudioStorage', dbVersion: 1 })
-    const transaction = db.transaction('audioFiles', 'readwrite')
-    const store = transaction.objectStore('audioFiles')
-    const record: AudioFileRecord = { fileName, arrayBuffer, metadata }
-    store.put(record)
-
-    return new Promise<void>((resolve, reject) => {
-        transaction.oncomplete = () => {
-            logger.debug(`Stored audio file ${fileName} successfully`, metadata)
-            resolve()
-        }
-
-        transaction.onerror = () => {
-            reject(transaction.error)
-        }
-    })
 }
 
 /**
@@ -147,7 +175,7 @@ export const getAudioFile = async ({
             } else {
                 logger.warn(`Audio file ${fileName} not found`)
             }
-            resolve(request.result || null)
+            resolve(request.result ?? null)
         }
 
         request.onerror = () => {
@@ -233,40 +261,18 @@ export const deleteAudioFile = async ({
                 if (e.data.type === 'deleteSuccess' && e.data.fileName === fileName) {
                     worker?.removeEventListener('message', handleMessage)
                     logger.debug(`Deleted audio file ${fileName} successfully in background`)
-                    
-                    // Double-check deletion
-                    audioFileExists({ fileName }).then((stillExists) => {
-                        if (stillExists) {
-                            logger.error(`File ${fileName} still exists after worker deletion, trying direct deletion`)
-                            // Try direct deletion as fallback
-                            deleteDirectly(fileName).then(() => resolve()).catch((err) => reject(err))
-                        } else {
-                            resolve()
-                        }
-                    }).catch((err) => {
-                        logger.error(`Error checking if file exists: ${err}`)
-                        reject(err)
-                    })
+                    resolve()
                 } else if (e.data.type === 'error') {
                     worker?.removeEventListener('message', handleMessage)
-                    logger.error(`Worker error deleting ${fileName}: ${e.data.error}`)
-                    // Try direct deletion as fallback
-                    deleteDirectly(fileName).then(() => resolve()).catch((err) => reject(err))
+                    reject(new Error(e.data.error))
                 }
             }
 
             worker?.addEventListener('message', handleMessage)
             worker?.postMessage({
                 type: 'deleteAudioFile',
-                payload: { fileName }
+                payload: { fileName },
             })
-            
-            // Set a timeout to ensure we don't wait forever
-            setTimeout(() => {
-                worker?.removeEventListener('message', handleMessage)
-                logger.warn(`Timeout waiting for worker to delete ${fileName}, trying direct deletion`)
-                deleteDirectly(fileName).then(() => resolve()).catch((err) => reject(err))
-            }, 2000)
         })
     }
 
@@ -288,6 +294,7 @@ async function deleteDirectly(fileName: string): Promise<void> {
         }
 
         transaction.onerror = () => {
+            logger.error(`Failed to delete ${fileName}:`, transaction.error)
             reject(transaction.error)
         }
     })
@@ -312,4 +319,46 @@ export const listAudioFiles = async (): Promise<AudioFileRecord[]> => {
             reject(request.error)
         }
     })
+}
+
+// Helper function to check if IndexedDB is supported
+function isIndexedDBSupported(): boolean {
+    return typeof window !== 'undefined' && 'indexedDB' in window;
+}
+
+// Helper function to get IndexedDB instance
+async function getIndexedDBInstance(): Promise<IDBDatabase> {
+    return openDatabase({ dbName: 'AudioStorage', dbVersion: 1 });
+}
+
+export const getIndexedDBAudioFileMetadata = async (
+    fileName: string
+): Promise<AudioRecording | null> => {
+    try {
+        if (!isIndexedDBSupported()) {
+            console.warn('IndexedDB is not supported in this browser')
+            return null
+        }
+
+        const db = await getIndexedDBInstance()
+        const transaction = db.transaction(['metadata'], 'readonly')
+        const store = transaction.objectStore('metadata')
+        
+        const request = store.get(fileName)
+        
+        return new Promise((resolve, reject) => {
+            request.onsuccess = () => {
+                const metadata = request.result ?? null
+                resolve(metadata)
+            }
+            
+            request.onerror = (event: Event) => {
+                logger.error('Error getting file metadata from IndexedDB', event)
+                reject(new Error('Failed to retrieve file metadata from IndexedDB'))
+            }
+        })
+    } catch (error) {
+        logger.error('Error in getIndexedDBAudioFileMetadata', error)
+        return null
+    }
 }

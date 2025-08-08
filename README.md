@@ -28,7 +28,18 @@ Key features:
 - Speech recognition and audio analysis examples
 - Available on iOS and Android app stores
 
-Try the web version at [https://deeeed.github.io/expo-audio-stream/playground/](https://deeeed.github.io/expo-audio-stream/playground/)
+<div align="center">
+  <p>Try it now:</p>
+  <div style="display: flex; justify-content: center; gap: 20px; margin: 10px 0;">
+    <a href="https://apps.apple.com/app/audio-playground/id6739774966">
+      <img src="https://developer.apple.com/app-store/marketing/guidelines/images/badge-download-on-the-app-store.svg" alt="Download on the App Store" height="40" />
+    </a>
+    <a href="https://play.google.com/store/apps/details?id=net.siteed.audioplayground">
+      <img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="40" />
+    </a>
+  </div>
+  <p>Or try the web version at <a href="https://deeeed.github.io/expo-audio-stream/playground/">https://deeeed.github.io/expo-audio-stream/playground/</a></p>
+</div>
 
 ### Sherpa-ONNX Demo
 
@@ -88,6 +99,9 @@ For more details, check out the [sherpa-onnx demo](https://deeeed.github.io/expo
 - [x] Intelligent call interruption handling
 - [x] Integrate with react-native-whisper for real-time on device transcriptions. (demo in playground)
 - [x] Migrate audio analysis to c++ native library (implemented in @siteed/react-native-essentia)
+- [x] Cross-platform audio device detection, selection, and fallback handling
+- [x] Add Zero-Latency Audio Recording with `prepareRecording` API 
+- [ ] Integrate sherpa onnx models into expo-audio-studio and playground
 - [ ] Implement example app for custom VAD.
 - [ ] Audio preview waveform component from 'uri'. ( similar to https://github.com/SimformSolutionsPvtLtd/react-native-audio-waveform  )
 - [ ] e2e validation for cross platform features extraction (make sure we get exact same values on all platforms).

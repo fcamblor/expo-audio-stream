@@ -1,15 +1,18 @@
 // playground/src/app/_layout.tsx
+import { useEffect, useRef } from 'react'
+
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native'
+import Constants from 'expo-constants'
+import { Stack } from 'expo-router/stack'
+
 import { useTheme } from '@siteed/design-system'
 import { AudioRecorderProvider } from '@siteed/expo-audio-studio'
 import { getLogger } from '@siteed/react-native-logger'
-import Constants from 'expo-constants'
-import { Stack } from 'expo-router/stack'
-import { useEffect, useRef } from 'react'
 
 import { ApplicationContextProvider } from '../context/ApplicationProvider'
 import { AudioFilesProvider } from '../context/AudioFilesProvider'
 import { TranscriptionProvider } from '../context/TranscriptionProvider'
+import { WebAppBanner } from '../components/WebAppBanner'
 import { useAppUpdates } from '../hooks/useAppUpdates'
 import { isWeb } from '../utils/utils'
 const logger = getLogger('RootLayout')
@@ -19,15 +22,15 @@ export default function RootLayout() {
     const theme = useTheme()
 
 
-    const hasCheckedForUpdates = useRef<boolean>(isWeb);
-    const { checkUpdates } = useAppUpdates();
+    const hasCheckedForUpdates = useRef<boolean>(isWeb)
+    const { checkUpdates } = useAppUpdates()
 
     useEffect(() => {
       if (!hasCheckedForUpdates.current && !isWeb) {
-        checkUpdates(true);
-        hasCheckedForUpdates.current = true;
+        checkUpdates(true)
+        hasCheckedForUpdates.current = true
       }
-    }, [checkUpdates]);
+    }, [checkUpdates])
 
 
     useEffect(() => {
@@ -51,6 +54,9 @@ export default function RootLayout() {
                                 fonts: DefaultTheme.fonts,
                             }}
                         >
+                            {/* WebAppBanner appears above all content on web platform */}
+                            <WebAppBanner />
+                            
                             <Stack
                                 screenOptions={{
                                     headerBackButtonMenuEnabled: false,
