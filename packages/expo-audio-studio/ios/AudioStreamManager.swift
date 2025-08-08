@@ -1579,14 +1579,18 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
                 - Expected minimum size: \(WAV_HEADER_SIZE) bytes (WAV header)
                 """)
             
-            // Return nil if the file is too small
-            if wavFileSize <= WAV_HEADER_SIZE {
-                Logger.debug("Recording file is too small (≤ \(WAV_HEADER_SIZE) bytes), likely no audio data was recorded")
+            // Use the final totalDataSize tracked by the background queue
+            let finalDataChunkSize = self.totalDataSize - Int64(WAV_HEADER_SIZE)
+            if finalDataChunkSize <= 0 {
+                Logger.debug("Recording file data chunk size is zero or negative (\(finalDataChunkSize) bytes), likely no audio data was recorded successfully after header")
+                // Optionally delete the empty file?
+                // try? FileManager.default.removeItem(at: fileURL)
                 return nil
             }
             
-            // Update the WAV header with the correct file size
-            updateWavHeader(fileURL: fileURL, totalDataSize: wavFileSize - WAV_HEADER_SIZE)
+            // Update the WAV header with the correct final file size
+            updateWavHeader(fileURL: fileURL, totalDataSize: finalDataChunkSize)
+            Logger.debug("Final WAV header updated. Data chunk size: \(finalDataChunkSize)")
             
             // Validate compressed file if enabled
             var compression: CompressedRecordingInfo?
