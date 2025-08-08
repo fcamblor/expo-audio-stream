@@ -678,7 +678,11 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
                 }
                 // Open the handle for writing
                 self.fileHandle = try FileHandle(forWritingTo: url)
-                Logger.debug("File handle opened for \(url.path)")
+                // Write initial dummy header immediately
+                let header = createWavHeader(dataSize: 0)
+                self.fileHandle?.write(header)
+                self.totalDataSize = Int64(WAV_HEADER_SIZE) // Initialize size with header size
+                Logger.debug("File handle opened and initial header written for \(url.path). Initial size: \(self.totalDataSize)")
             } catch {
                 Logger.debug("Error creating/opening file handle: \(error.localizedDescription)")
                 // No need to call cleanupPreparation here, return false will handle it
