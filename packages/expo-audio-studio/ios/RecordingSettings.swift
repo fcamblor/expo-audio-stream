@@ -267,7 +267,7 @@ struct RecordingSettings {
         }
         
         settings.filename = dict["filename"] as? String
-        
+
         // Set new properties
         settings.deviceId = deviceId
         settings.deviceDisconnectionBehavior = deviceDisconnectionBehavior

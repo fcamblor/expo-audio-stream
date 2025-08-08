@@ -1251,7 +1251,7 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
         defer {
             fileHandle.closeFile()  // Ensure file is always closed
         }
-        
+
         let targetSampleRate = Double(settings.sampleRate)
         let targetFormat: AVAudioCommonFormat = settings.bitDepth == 32 ? .pcmFormatFloat32 : .pcmFormatInt16
         
@@ -1293,151 +1293,94 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
             Logger.debug("Buffer data is nil after processing.")
             return
         }
-        
+
         var data = Data(bytes: bufferData, count: Int(audioData.mDataByteSize))
-        
+
         // Check if this is the first buffer to process
         if totalDataSize == 0 {
             let header = createWavHeader(dataSize: 0)
             data.insert(contentsOf: header, at: 0)
         }
-        
+
         // Write to file
         fileHandle.seekToEndOfFile()
         fileHandle.write(data)
-        
+
         // Update total size and accumulated data
         totalDataSize += Int64(data.count)
         accumulatedData.append(data)
         accumulatedAnalysisData.append(data)
-        
-        // Handle notifications if enabled
+
         if recordingSettings?.showNotification == true {
             updateNotificationDuration()
         }
-        
-        // Emit data based on interval
+
         let currentTime = Date()
-        if let lastEmissionTime = lastEmissionTime,
-           let startTime = startTime,
-           currentTime.timeIntervalSince(lastEmissionTime) >= emissionInterval {
-            
-            let recordingTime = currentTime.timeIntervalSince(startTime)
-            let dataToProcess = accumulatedData
-            
-            // Prepare compression info if enabled
+        let currentTotalSize = self.totalDataSize // Use the most up-to-date size for events
+
+        // Emit AudioData event
+        if let lastEmission = self.lastEmissionTime,
+           currentTime.timeIntervalSince(lastEmission) >= emissionInterval,
+           !accumulatedData.isEmpty {
+            let dataToEmit = accumulatedData
+            let recordingTime = currentRecordingDuration()
+            self.lastEmissionTime = currentTime
+            self.lastEmittedSize = currentTotalSize
+            accumulatedData.removeAll()
             var compressionInfo: [String: Any]? = nil
-            if settings.enableCompressedOutput, let compressedURL = compressedFileURL {
-                do {
-                    // Ensure file exists and has data
-                    if FileManager.default.fileExists(atPath: compressedURL.path) {
-                        let compressedAttributes = try FileManager.default.attributesOfItem(atPath: compressedURL.path)
-                        if let compressedSize = compressedAttributes[.size] as? Int64 {
-                            let eventDataSize = compressedSize - lastEmittedCompressedSize
-                            
-                            Logger.debug("Compressed file status - Total size: \(compressedSize), New data size: \(eventDataSize)")
-                            
-                            // Read the new compressed data if there's new data
-                            var compressedData: String? = nil
-                            if eventDataSize > 0 {
-                                do {
-                                    let fileHandle = try FileHandle(forReadingFrom: compressedURL)
-                                    defer { fileHandle.closeFile() }
-                                    
-                                    fileHandle.seek(toFileOffset: UInt64(lastEmittedCompressedSize))
-                                    let data = fileHandle.readData(ofLength: Int(eventDataSize))
-                                    compressedData = data.base64EncodedString()
-                                    
-                                    Logger.debug("Read compressed data of size: \(data.count)")
-                                } catch {
-                                    Logger.debug("Error reading compressed data: \(error)")
-                                }
-                            }
-                            
-                            lastEmittedCompressedSize = compressedSize
-                            
-                            compressionInfo = [
-                                "position": recordingTime * 1000, // Convert to milliseconds
-                                "fileUri": compressedURL.absoluteString,
-                                "eventDataSize": eventDataSize,
-                                "totalSize": compressedSize,
-                                "data": compressedData ?? ""
-                            ]
-                            
-                            Logger.debug("Compression info prepared: \(String(describing: compressionInfo))")
-                        } else {
-                            Logger.debug("Could not get compressed file size")
-                        }
-                    } else {
-                        Logger.debug("Compressed file does not exist at path: \(compressedURL.path)")
-                    }
-                } catch {
-                    Logger.debug("Error preparing compression info: \(error)")
-                }
-            }
-            
-            // Emit the audio data with compression info
+            // TODO: Get actual compressed file size if needed for this event
             delegate?.audioStreamManager(
                 self,
-                didReceiveAudioData: dataToProcess,
+                didReceiveAudioData: dataToEmit,
                 recordingTime: recordingTime,
-                totalDataSize: totalDataSize,
+                totalDataSize: currentTotalSize,
                 compressionInfo: compressionInfo
             )
-            
-            // Update state after emission
-            self.lastEmissionTime = currentTime
-            self.lastEmittedSize = totalDataSize
-            accumulatedData.removeAll()
+            // Logger.debug("Emitted didReceiveAudioData event.") // Optional: Re-enable if needed
         }
 
 
-        if let lastEmissionTimeAnalysis = lastEmissionTimeAnalysis,
-           let startTime = startTime,
-           currentTime.timeIntervalSince(lastEmissionTimeAnalysis) >= emissionIntervalAnalysis {
-            
-            let dataToProcess = accumulatedAnalysisData
+        // Dispatch analysis task
+        if let lastEmissionAnalysis = self.lastEmissionTimeAnalysis,
+           currentTime.timeIntervalSince(lastEmissionAnalysis) >= emissionIntervalAnalysis,
+           settings.enableProcessing,
+           let processor = self.audioProcessor,
+           !accumulatedAnalysisData.isEmpty {
+            let dataToAnalyze = accumulatedAnalysisData
+            self.lastEmissionTimeAnalysis = currentTime
+            accumulatedAnalysisData.removeAll()
 
-            // Process audio if enabled
-            if settings.enableProcessing {
-                DispatchQueue.global().async { [weak self] in
-                    guard let self = self else { return }
-                    if let processor = self.audioProcessor {
-                        Logger.debug("Processing audio buffer of size: \(dataToProcess.count)")
-                        
-                        // Strip WAV header from the first buffer to avoid false amplitude detection
-                        let dataToAnalyze: Data
-                        if self.totalDataSizeAnalysis == 0 && dataToProcess.count > Int(WAV_HEADER_SIZE) {
-                            // This is the first buffer and may contain the WAV header
-                            dataToAnalyze = dataToProcess.subdata(in: Int(WAV_HEADER_SIZE)..<dataToProcess.count)
-                            Logger.debug("Removed WAV header (\(WAV_HEADER_SIZE) bytes) from first buffer for analysis")
-                        } else {
-                            dataToAnalyze = dataToProcess
-                        }
-                        
-                        let processingResult = processor.processAudioBuffer(
-                            data: dataToAnalyze,
-                            sampleRate: Float(settings.sampleRate),
-                            segmentDurationMs: settings.segmentDurationMs,
-                            featureOptions: settings.featureOptions ?? [:],
-                            bitDepth: settings.bitDepth,
-                            numberOfChannels: settings.numberOfChannels
-                        )
-                        
-                        DispatchQueue.main.async {
-                            if let result = processingResult {
-                                self.delegate?.audioStreamManager(self, didReceiveProcessingResult: result)
-                            }
-                        }
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self, let processor = self.audioProcessor, let settings = self.recordingSettings else {
+                    // Logger.debug("Analysis Dispatch SKIP: self, processor, or settings nil")
+                    return
+                }
+                guard !dataToAnalyze.isEmpty else {
+                    // Logger.debug("Analysis Dispatch SKIP: dataToAnalyze is empty")
+                    return
+                }
 
-                        // Update state after emission
-                        self.lastEmissionTimeAnalysis = currentTime
-                        // Update the total analysis data size to mark that we've processed data
-                        self.totalDataSizeAnalysis = self.totalDataSize
-                        accumulatedAnalysisData.removeAll()
+                // Logger.debug("Analysis Dispatch: Processing \(dataToAnalyze.count) bytes...")
+                let processingResult = processor.processAudioBuffer(
+                    data: dataToAnalyze,
+                    sampleRate: Float(settings.sampleRate),
+                    segmentDurationMs: settings.segmentDurationMs,
+                    featureOptions: settings.featureOptions ?? [:],
+                    bitDepth: settings.bitDepth,
+                    numberOfChannels: settings.numberOfChannels
+                )
+
+                // Dispatch result back to main thread
+                DispatchQueue.main.async {
+                    if let result = processingResult {
+                         // Logger.debug("Analysis Dispatch: Success, calling delegate.")
+                        self.delegate?.audioStreamManager(self, didReceiveProcessingResult: result)
+                    } else {
+                         Logger.debug("Analysis Dispatch FAIL: processor.processAudioBuffer returned nil")
                     }
                 }
             }
+            // Logger.debug("Dispatched analysis task.") // Optional: Re-enable if needed
         }
     }
 
