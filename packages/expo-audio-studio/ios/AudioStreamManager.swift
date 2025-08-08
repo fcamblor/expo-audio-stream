@@ -875,13 +875,7 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
         do {
             enableWakeLock()
             
-            // Start the audio engine
-            try audioEngine.start()
-            
-            // Start the compressed recorder if prepared
-            compressedRecorder?.record()
-            
-            // Set recording state
+            // Set recording state *before* starting engine to avoid race condition
             startTime = Date()
             totalPausedDuration = 0
             currentPauseStart = nil
@@ -889,6 +883,12 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
             lastEmissionTimeAnalysis = Date()
             isRecording = true
             isPaused = false
+            
+            // Start the audio engine
+            try audioEngine.start()
+            
+            // Start the compressed recorder if prepared
+            compressedRecorder?.record()
             
             // Show notifications if enabled
             if settings.showNotification {
