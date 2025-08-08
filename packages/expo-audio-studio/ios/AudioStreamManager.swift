@@ -1304,33 +1304,34 @@ class AudioStreamManager: NSObject, AudioDeviceManagerDelegate {
             return
         }
 
-        var data = Data(bytes: bufferData, count: Int(audioData.mDataByteSize))
+        // Create an immutable copy for background/event emission
+        var dataToWrite = Data(bytes: bufferData, count: Int(audioData.mDataByteSize))
 
         // Check if this is the first buffer to process
         if totalDataSize == 0 {
             let header = createWavHeader(dataSize: 0)
-            data.insert(contentsOf: header, at: 0)
+            dataToWrite.insert(contentsOf: header, at: 0)
         }
 
         // --- Background File Writing ---
         // Use the persistent fileHandle opened during preparation.
-        DispatchQueue.global(qos: .utility).async { [weak self, data] in
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self, let handle = self.fileHandle else {
                 Logger.debug("BG Write Error: File handle is nil.")
                 return
             }
             do {
                 try handle.seekToEnd()
-                try handle.write(contentsOf: data)
+                try handle.write(contentsOf: dataToWrite)
             } catch {
-                Logger.debug("BG Write Error: Failed to seek/write: \(error.localizedDescription)")
+                 Logger.debug("BG Write Error: Failed to seek/write: \(error.localizedDescription)")
             }
         }
 
-        // Update total size and accumulated data
-        totalDataSize += Int64(data.count)
-        accumulatedData.append(data)
-        accumulatedAnalysisData.append(data)
+        // --- Event Emission & Analysis ---
+        totalDataSize += Int64(dataToWrite.count)
+        accumulatedData.append(dataToWrite)
+        accumulatedAnalysisData.append(dataToWrite)
 
         if recordingSettings?.showNotification == true {
             updateNotificationDuration()
